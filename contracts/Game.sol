@@ -1,44 +1,35 @@
 pragma solidity ^0.4.24;
 
 import "./lib/SafeMath.sol";
-import "./lib/DateTime.sol";
-import "./lib/Utils.sol";
 
 contract Game {
   using SafeMath for *;
-  using DateTime for uint;
 
-  uint constant offsetTimeZone = 8 hours;
-  uint constant baseRate = 100;
+  address public owner = 0x737CBb8906Af842cC6270D64c315167779268dF6;
+  //0x37cffcb24edc31388d8cc1159e01617a9284df3954a9a6080001bb42060076cb
 
-  address public owner = 0xffffffffffffffffffffffffffffffffffffffff;
   uint public commEthBal; // community eth balance
-
-  uint public vipPot; // vip奖池
-  string public vipPotLastModified; // 最近修改vip奖池的时间 20181127
-
   uint public currRID; // 当前是第几局
-  // TODO: change me back for production
-  uint public rndTime = 1 hours;
+
+  uint public rndTime = 5 minutes;
   uint constant public LAND_NUM = 9;
   uint constant public currSeedPrice = 0.001 ether; // 当前种子价格
   uint constant public initKettlePrice = 0.01 ether;
   uint constant public initShovelPrice = 0.05 ether;
 
-  uint highestRebate = 400 ether; // 最高返利
-  mapping(uint => uint) mapLevel;
-  mapping(uint => uint) mapRebate;
+  uint adminCount;
+  bool public activated = false;
 
   struct Admin {
     bool isAdmin;
     uint rate; // need to divide by 100
   }
+
   mapping (address => Admin) public admins;
 
-  uint adminCount;
-
   address[] public adminAddr = [
-    0xffffffffffffffffffffffffffffffffffffffff // com
+    0x737CBb8906Af842cC6270D64c315167779268dF6,
+    0x737CBb8906Af842cC6270D64c315167779268dF6
   ];
 
   //^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
@@ -46,28 +37,17 @@ contract Game {
   //^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
   constructor() public { // 构造函数, 初始化参数
     // TODO: remove me for prod. lets start first round
-    currRID = 1;
+
     // mapRIDToRnd[1].currPot = 1 ether;
+    currRID = 1;
     mapRIDToRnd[1].isBegin = true;
     mapRIDToRnd[1].isEnded = false;
     mapRIDToRnd[1].currShovelPrice = initShovelPrice;
     mapRIDToRnd[1].beginTime = block.timestamp;
     mapRIDToRnd[1].endTime = mapRIDToRnd[1].beginTime.add(rndTime);
-    // TODO: init with proper value ?
-    // vipPotLastModified =''; // 不需要初始化
-    mapLevel[1] = 1 ether;
-    mapLevel[2] = 5 ether;
-    mapLevel[3] = 50 ether;
-    mapLevel[4] = 100 ether;
+    admins[adminAddr[0]] = Admin(true, 100); //
 
-    mapRebate[1] = 5; //5% 扩大了100倍
-    mapRebate[2] = 10; //同上
-    mapRebate[3] = 30; //同上
-    mapRebate[4] = 50; //同上
-
-    admins[adminAddr[0]] = Admin(true, 5);
-
-    adminCount = 12;
+    adminCount = 2;
   }
 
 //****************
@@ -75,8 +55,8 @@ contract Game {
 //****************
   struct Round {
     uint RID;
-    bool isBegin; // 游戏状态是否开始
-    bool isEnded; // 游戏状态是否开始
+    bool isBegin;
+    bool isEnded;
     uint beginTime;
     uint endTime;
     uint currShovelPrice; // 当前铲子价格 本轮相关
@@ -87,6 +67,7 @@ contract Game {
     uint ethNum;  // total eth in
     address lastWinner;
   }
+
   mapping (uint => Round) public mapRIDToRnd;
 
 //****************
@@ -118,30 +99,10 @@ contract Game {
   struct Player { // 用户
     address user;
     uint ethBalance; // 提款数量
-    uint vipBalance; // 返利
     uint expectedReward; // 预期收益
     uint lrnd;   // last round played
     uint level; // 1-4
-    uint toBeVipTime; // 成为vip的时间
-    mapping(address => Inviter) mapToInviter;
-    address[] inviters;
   }
-
-  struct Inviter { // 邀请者
-    address master; // 被谁邀请的
-    address user; // 自己的
-    uint level; // 1-4
-    uint toBeVipTime; // 成为vip的时间
-  }
-
-  struct dayRebate { // 每天的福利
-    uint num; //邀请的数量
-    uint rate; // 每天利率, 扩大了100倍
-    uint amount; // 每天返利数量
-  }
-
-  mapping (address => mapping(string => dayRebate)) mapDateToRebate;
-  // 0x7E825292c4014cF2654DACd6b5C9F8bD29482905 => 20181031 => dayRebate
 
   // 记录用户最近一次提币的数量
   mapping (address => uint) public mapPlayerToLastWithdraw;
@@ -188,9 +149,10 @@ contract Game {
     string extra
   );
 
-//****************
-// MODIFIER
-//****************
+
+  //****************
+  // MODIFIER
+  //****************
   modifier isHuman() {
     address _addr = msg.sender;
     uint256 _codeLength;
@@ -205,15 +167,17 @@ contract Game {
     _;
   }
 
-  modifier isGameBegin() { // 游戏是否开始
+  modifier isGameBegin() {
     require(mapRIDToRnd[currRID].isBegin == true, "the game not beginning");
     _;
   }
 
-  modifier isGameEnded() { // 游戏是否开始
+  modifier isGameEnded() {
     require(mapRIDToRnd[currRID].isEnded == true, "the game not beginning");
     _;
   }
+
+  ////////////////////////////////////////////////////////////////////////////
 
   function addMoney() public payable isHuman {
     require(msg.value > 0, "value must be bigger than 0");
@@ -302,7 +266,6 @@ contract Game {
     // event
     //****************
     emit onPay("buySeed", msg.sender, 1, msg.value, landInx);
-    addRebate(msg.value, msg.sender); // 计算vip折扣, 并从vipPot减去数值
   }
 
   function getTreeLevelByKettleNum(uint kettleNum) private pure returns (uint) {
@@ -402,7 +365,6 @@ contract Game {
     // event
     //****************
     emit onPay("buyKettle", msg.sender, _kettleNum, msg.value, landInx);
-    addRebate(msg.value, msg.sender); // 计算vip折扣, 并从vipPot减去数值
   }
 
   function buyShovel(uint landInx) public payable isGameBegin isHuman {
@@ -424,9 +386,9 @@ contract Game {
     uint _toComm = _ethUsed / 10;  // 分给社区的eth
     uint _toCurrPot = _ethUsed.sub(_toComm); // 分给tree和下一轮奖池的eth
 
-//****************
-// update round info
-//****************
+    //****************
+    // update round info
+    //****************
     // 更新本轮总eth: ethNum
     mapRIDToRnd[currRID].ethNum = mapRIDToRnd[currRID].ethNum.add(_ethUsed);
     // 玩家每笔交易的10%自动抽取
@@ -445,9 +407,9 @@ contract Game {
     // 增加铲子价格, 铲子每被任何玩家买一次, 价格都增加0.1eth
     mapRIDToRnd[currRID].currShovelPrice = currShovelPrice.add(0.1 ether);
 
-//****************
-// update tree info
-//****************
+    //****************
+    // update tree info
+    //****************
     // 更新树 isDead = true, 其它数据保留
     _currTree.isDead = true;
 
@@ -470,20 +432,19 @@ contract Game {
       }
     }
 
-//****************
-// update player info
-//****************
+    //****************
+    // update player info
+    //****************
     // 更新用户所有的eth收入到ethBalance
     updatePlayerVault();
 
-//****************
-// event
-//****************
+    //****************
+    // event
+    //****************
     emit onPay("buyShovel", msg.sender, 1, msg.value, landInx);
 
     // event: 本轮奖金池
     emit onPotChanged(mapRIDToRnd[currRID].currPot);
-    addRebate(msg.value, msg.sender);  //计算vip折扣, 并从vipPot减去数值
   }
 
   function withdraw() public isHuman returns (uint) {  // 用户提币
@@ -494,15 +455,14 @@ contract Game {
     updatePlayerVault();
 
     address _addr = msg.sender;
-    uint _earnings = mapAddrToPlayer[_addr].ethBalance.add(mapAddrToPlayer[_addr].vipBalance);
+    uint _earnings = mapAddrToPlayer[_addr].ethBalance;
 
     require(_earnings > 0, "提款数大于0");
     require(_earnings < address(this).balance, "提款数不能大于合约余额");
-    vipSettlement(); // vip奖池结算
 
     // 先清零
     mapAddrToPlayer[_addr].ethBalance = 0;
-    mapAddrToPlayer[_addr].vipBalance = 0;
+
     // 再转账
     _addr.transfer(_earnings);
 
@@ -513,7 +473,7 @@ contract Game {
   /**
     * @dev vault earnings 不包含vip的返还
     * @return earnings in wei format
-    */
+  */
   function getPlayerEthEarning(address _addr) public view returns (uint) {
     uint _lrnd = mapAddrToPlayer[_addr].lrnd;
     // 初始化为玩家ethBalance
@@ -549,16 +509,13 @@ contract Game {
     return _ethBalance;
   }
 
-  // 可以随时提取的eth数量，只显示，不更新，包含ethBalance和vipBalance
+  // 可以随时提取的eth数量，只显示，不更新，包含ethBalance
   function getPlayerEarnings(address _addr) public view returns (uint, uint, uint, bool) {
     uint total = commEthBal;
-    if (!equalStr(getDateForZone(block.timestamp), vipPotLastModified)) {
-      total = total.add(vipPot);
-    }
 
     return (
       getPlayerEthEarning(_addr),
-      mapAddrToPlayer[_addr].vipBalance,
+      0,
       total.mul(admins[_addr].rate) / 100,
       admins[_addr].isAdmin
     );
@@ -668,20 +625,12 @@ contract Game {
     rndTime = time.mul(1 minutes);
   }
 
-  /** upon contract deploy, it will be deactivated.  this is a one time
-    * use function that will activate the contract.  we do this so devs
-    * have time to set things up on the web end
-  **/
-
-  bool public activated = false;
-
   function startGame() public isAdmin isHuman {
     // can only be ran once
     require(activated == false, "bigtree already activated");
 
     // activate the contract
     activated = true;
-    vipPotLastModified = getDateForZone(block.timestamp);
     // lets start first round
     // currRID = 1;
     // initRndData(currRID);
@@ -696,115 +645,6 @@ contract Game {
     selfdestruct(owner);
   }
 
-  function getDateForZone(uint _now) private returns(string) {
-    uint _time = _now.add(offsetTimeZone);
-
-    DateTime._DateTime memory _dt = _time.parseTimestamp();
-
-    string memory _month = Utils.uint2str(_dt.month);
-    string memory _day = Utils.uint2str(_dt.day);
-
-    if(_dt.month < 10) {
-      _month = Utils.strConcat(Utils.uint2str(0), Utils.uint2str(_time.getMonth()));
-    }
-
-    if(_dt.day < 10) {
-      _day = Utils.strConcat("0", Utils.uint2str(_time.getDay()));
-    }
-
-    return Utils.strConcat(Utils.uint2str(_dt.year), _month, _day);
-  }
-
-  function getVip(address _who) public view isHuman returns (uint){
-    return mapAddrToPlayer[_who].level;
-  }
-
-  function getInvitationNum(address _who) public view isHuman returns (uint){
-    return mapDateToRebate[_who][getDateForZone(block.timestamp)].num;
-  }
-
-  function buyVip(uint level) public payable isHuman isGameBegin {
-    require(level > 0, "level大于等于1");
-    require(level < 5, "level小于等于4");
-    require(level > mapAddrToPlayer[msg.sender].level, "vip等级不能降低或重复购买");
-
-    require(mapLevel[level] > 0, "_value大于0");
-    require(msg.value == mapLevel[level], "");
-
-    mapAddrToPlayer[msg.sender].user = msg.sender;
-    mapAddrToPlayer[msg.sender].level = level;
-    mapAddrToPlayer[msg.sender].toBeVipTime = block.timestamp;
-
-    mapAddrToPlayer[msg.sender].toBeVipTime = block.timestamp;
-
-    // 如果升级, 清空原来邀请的用户
-    mapDateToRebate[msg.sender][getDateForZone(block.timestamp)].rate = 0;
-    mapDateToRebate[msg.sender][getDateForZone(block.timestamp)].num = 0;
-
-    vipSettlement(); // 结算vip奖池
-    addVipPot(msg.value); // vip奖池入账
-
-    emit onVip(0, msg.sender, level, "vip");
-  }
-
-  function invitation(address _inviter, uint level) public payable isHuman isGameBegin {
-    // 通过https://treegame.vip/?addr=0x7E825292c4014cF2654DACd6b5C9F8bD29482905&level=2
-    // 可以自己邀请自己
-    // 可以重复购买
-
-    require(level>0, "level大于等于1");
-    require(level<5, "level小于等于4");
-    require(mapAddrToPlayer[_inviter].level == level, "被邀请者等级必须等于邀请者");
-
-    uint _value = mapLevel[level];
-    require(_value>0, "_value大于0");
-    require(msg.value == _value, "");
-
-    mapAddrToPlayer[msg.sender].toBeVipTime = block.timestamp;
-    mapAddrToPlayer[msg.sender].level = level;
-
-    mapAddrToPlayer[_inviter].inviters.push(msg.sender);
-    mapAddrToPlayer[_inviter].mapToInviter[msg.sender] = Inviter(_inviter, msg.sender,level, block.timestamp);
-
-    uint _num = mapDateToRebate[_inviter][getDateForZone(block.timestamp)].num.add(1);
-    uint _rate = (mapRebate[level]).mul(_num);
-
-    if (_rate > baseRate.mul(2)) { // _rate最大是200%, 此处扩大了100倍
-      _rate = baseRate.mul(2);
-    }
-
-    mapDateToRebate[_inviter][getDateForZone(block.timestamp)].num = _num;
-    mapDateToRebate[_inviter][getDateForZone(block.timestamp)].rate = _rate;
-
-    vipSettlement(); // 结算vip奖池
-    addVipPot(msg.value); // vip奖池入账
-
-    emit onVip(_inviter, msg.sender, level, "invitation");
-  }
-
-  function addRebate(uint _val, address _who) private {  //计算vip折扣, 并从vipPot减去数值
-
-    uint rate = mapDateToRebate[_who][getDateForZone(block.timestamp)].rate;
-
-    uint _rebate = _val.mul(rate)/baseRate; //之前rate扩大100倍, 此处缩小100倍
-
-    // 如果达到highestRebate, 优惠额度不在增加
-    uint _amount = mapDateToRebate[_who][getDateForZone(block.timestamp)].amount;
-    uint gap = highestRebate.sub(_amount); // gap会等于0
-
-    if(gap >= _rebate){ // 不能超过最大折扣数量
-      subVipPot(_rebate);
-      mapDateToRebate[_who][getDateForZone(block.timestamp)].amount = _amount.add(_rebate);
-      mapAddrToPlayer[_who].vipBalance = mapAddrToPlayer[_who].vipBalance.add(_rebate);
-    }else { //如果超过了, 补齐差值, 凑足400ether
-      subVipPot(gap);
-      mapDateToRebate[_who][getDateForZone(block.timestamp)].amount = highestRebate;
-      mapAddrToPlayer[_who].vipBalance = mapAddrToPlayer[_who].vipBalance.add(gap);
-    }
-
-
-  }
-
   function withdrawComm() public isHuman returns (uint) {  // admin提币
     address _addr = msg.sender;
     address _tmpAddr;
@@ -812,7 +652,6 @@ contract Game {
     uint _tmpBalTotal;
     uint _eth;
     require(admins[_addr].isAdmin, "You need to be one of the community members.");
-    vipSettlement(); // vip奖池结算
 
     if (commEthBal > 0) {
       for (uint i = 0; i < adminCount - 1; i++) {
@@ -821,17 +660,17 @@ contract Game {
         _tmpBalTotal = _tmpBalTotal.add(_tmpBal);
         mapAddrToPlayer[_tmpAddr].ethBalance = mapAddrToPlayer[_tmpAddr].ethBalance.add(_tmpBal);
       }
+
       // 最后一个单独处理
       mapAddrToPlayer[adminAddr[adminCount - 1]].ethBalance = mapAddrToPlayer[adminAddr[adminCount - 1]].ethBalance.add(commEthBal.sub(_tmpBalTotal));
       // 清零
       commEthBal = 0;
     }
-    _eth = mapAddrToPlayer[_addr].ethBalance.add(mapAddrToPlayer[_addr].vipBalance);
+    _eth = mapAddrToPlayer[_addr].ethBalance;
     // 记录提币记录
     mapPlayerToLastWithdraw[_addr] = _eth;
     // 先清零
     mapAddrToPlayer[_addr].ethBalance = 0;
-    mapAddrToPlayer[_addr].vipBalance = 0;
 
     require(_eth > 0, "You need to have eth.");
 
@@ -840,32 +679,6 @@ contract Game {
 
     emit onWithdraw(_addr, _eth);
     return _eth;
-  }
-
-  // vip奖池的结算
-  // buyvip invitation的时候 触发vip结算
-  function vipSettlement() private {
-    // 比较时间字符串
-
-    if (!equalStr(getDateForZone(block.timestamp), vipPotLastModified)){ // 如果不一致, 需要结算, vipPot的剩余资金进入commEthBal
-      commEthBal.add(vipPot);
-      vipPot = 0; // 清零
-      vipPotLastModified = getDateForZone(block.timestamp);
-    }
-  }
-
-  // vip奖池进账
-  function addVipPot(uint _val) private {
-    vipPot = vipPot.add(_val);
-  }
-
-  // vip奖池出账
-  function subVipPot(uint _val) private {
-    vipPot = vipPot.sub(_val);
-  }
-
-  function equalStr(string a, string b) private returns (bool) {
-    return keccak256(a) == keccak256(b);
   }
 
 }
