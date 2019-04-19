@@ -142,14 +142,6 @@ contract Game {
     uint256 endTime
   );
 
-  event onVip( // vip事件
-    address indexed inviter, // 邀请者
-    address indexed user, // 用户
-    uint level, //等级
-    string extra
-  );
-
-
   //****************
   // MODIFIER
   //****************
